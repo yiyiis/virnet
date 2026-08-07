@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"virtualnet/common"
 )
 
 // Client 表示虚拟网络中的客户端
@@ -48,50 +46,6 @@ func initIPPool() {
 // 生成认证令牌
 func generateToken(virtualIP string) string {
 	return fmt.Sprintf("%s-%d", virtualIP, time.Now().UnixNano())
-}
-
-// 向新客户端发送连接指令（连接所有已在线客户端），并向所有已在线客户端发送连接指令（连接新客户端）
-func triggerConnections(newClient *Client) {
-	mutex.RLock()
-	defer mutex.RUnlock()
-
-	// 遍历所有已在线的客户端（排除新客户端自己）
-	for existingIP, existingClient := range clients {
-		if existingIP == newClient.virtualIP {
-			continue // 跳过自己
-		}
-
-		// 检查新客户端与现有客户端是否已建立连接（避免重复）
-		newClient.mu.Lock()
-		_, newHasConn := newClient.tcpConns[existingIP]
-		newClient.mu.Unlock()
-
-		existingClient.mu.Lock()
-		_, existingHasConn := existingClient.tcpConns[newClient.virtualIP]
-		existingClient.mu.Unlock()
-
-		if newHasConn || existingHasConn {
-			continue // 已存在连接，跳过
-		}
-
-		// 1. 通知新客户端连接现有客户端
-		connectContent := common.ConnectContent{
-			ConnectFor: existingIP,
-			FromIP:     newClient.virtualIP,
-		}
-		content, _ := json.Marshal(connectContent)
-		sendWSMessage(newClient, common.MsgTypeConnect, content)
-
-		// 2. 通知现有客户端连接新客户端
-		existingConnectContent := common.ConnectContent{
-			ConnectFor: newClient.virtualIP,
-			FromIP:     existingIP,
-		}
-		existingContent, _ := json.Marshal(existingConnectContent)
-		sendWSMessage(existingClient, common.MsgTypeConnect, existingContent)
-
-		log.Printf("触发连接: %s <-> %s", newClient.virtualIP, existingIP)
-	}
 }
 
 // 清理连接

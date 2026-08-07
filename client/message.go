@@ -136,20 +136,26 @@ func processWSMessage(data []byte) {
 
 		curInfo := clientInfos[curInfoIdx]
 		mutex.Lock()
+		// 用广播数据重建在线节点列表（全部在线节点）
+		onlinePeers = make([]PeerInfo, 0, len(clientInfos))
 		for _, clientInfo := range clientInfos {
-			client, ok := tcpConns[clientInfo.VirtualIP]
-			if !ok {
-				continue
+			// 更新已连接节点的 name/latency
+			if client, ok := tcpConns[clientInfo.VirtualIP]; ok {
+				client.SetId(clientInfo.Name)
 			}
 
-			client.SetId(clientInfo.Name)
-			if clientInfo.VirtualIP == virtualIP {
+			latency := clientInfo.Latency
+			if clientInfo.VirtualIP != virtualIP {
+				latency = curInfo.Latency + clientInfo.Latency // 到对端的总延迟
+			} else {
 				log.Printf("到服务器延迟: %dms", clientInfo.Latency)
-				client.SetLatency(int(clientInfo.Latency))
-				continue
 			}
-			log.Printf("延迟 -> %s : %dms", clientInfo.VirtualIP, curInfo.Latency+clientInfo.Latency)
-			client.SetLatency(int(curInfo.Latency + clientInfo.Latency))
+
+			onlinePeers = append(onlinePeers, PeerInfo{
+				Name:      clientInfo.Name,
+				VirtualIP: clientInfo.VirtualIP,
+				Latency:   latency,
+			})
 		}
 		mutex.Unlock()
 

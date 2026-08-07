@@ -64,8 +64,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	assignData, _ := json.Marshal(assignContent)
 	sendWSMessage(client, common.MsgTypeAssignIP, assignData)
 
-	// 触发与所有已在线客户端的连接
-	triggerConnections(client)
+	// 按需连接：上线时不再自动建立 TCP 连接，由客户端主动发起 connect_req
 
 	// 启动延迟测试定时器
 	go startLatencyTicker(client)
@@ -138,6 +137,33 @@ func cleanupClient(client *Client, virtualIP string) {
 // 处理客户端WebSocket消息
 func handleClientWS(client *Client, msg common.WSMessage) {
 	switch msg.Type {
+	case common.MsgTypeConnectReq:
+		// 客户端主动发起连接请求，服务器通知被动方建立反向TCP连接
+		// TODO: 私有态需被动方同意，当前默认公开自动连接
+		var content common.ConnectContent
+		if err := json.Unmarshal(msg.Content, &content); err != nil {
+			log.Printf("解析连接请求失败: %v", err)
+			return
+		}
+
+		mutex.RLock()
+		dstClient, exists := clients[content.ConnectFor]
+		mutex.RUnlock()
+
+		if !exists {
+			sendWSMessage(client, common.MsgTypeError, errorContent(404, "目标节点不存在"))
+			return
+		}
+
+		// 通知被动方连接请求方（复用现有 MsgTypeConnect -> establishTCPConnection 链路）
+		connectContent := common.ConnectContent{
+			ConnectFor: client.virtualIP,
+			FromIP:     content.ConnectFor,
+		}
+		data, _ := json.Marshal(connectContent)
+		sendWSMessage(dstClient, common.MsgTypeConnect, data)
+		log.Printf("按需连接: %s 请求连接 %s", client.virtualIP, content.ConnectFor)
+
 	case common.MsgTypePong:
 		client.mu.Lock()
 		client.latency = time.Since(client.lastLatencyStartTime).Milliseconds()

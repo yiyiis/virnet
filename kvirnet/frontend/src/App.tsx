@@ -1,12 +1,12 @@
 import React, {useState, useEffect} from 'react';
 import {
     List, Spin, Layout, Typography,
-    Badge, Modal, Input, Button
+    Badge, Modal, Input, Button, message
 } from 'antd';
 import {
-    WifiOutlined, SyncOutlined, ClockCircleOutlined, ManOutlined, SettingOutlined
+    WifiOutlined, SyncOutlined, ClockCircleOutlined, ManOutlined, SettingOutlined, LinkOutlined
 } from '@ant-design/icons';
-import {GetClient, SetClientInfo} from "../bindings/virtualnet/kvirnet/clientservice.ts";
+import {GetOnlinePeers, ConnectTo, SetClientInfo} from "../bindings/virtualnet/kvirnet/clientservice.ts";
 import {Events} from "@wailsio/runtime";
 
 
@@ -65,6 +65,8 @@ interface VpnNode {
     id: string;
     ip: string;
     latency: number; // 延迟(ms)
+    connected: boolean; // 是否已建立连接
+    isLocal: boolean; // 是否为本机
 }
 
 const App: React.FC = () => {
@@ -72,13 +74,14 @@ const App: React.FC = () => {
     const [nodes, setNodes] = useState<VpnNode[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [openSetting, setOpenSetting] = useState(true)
+    const [connecting, setConnecting] = useState<string | null>(null)
 
 
-    // 模拟数据加载
+    // 加载在线节点列表
     useEffect(() => {
         const fetchData = async () => {
 
-            const data = await GetClient()
+            const data = await GetOnlinePeers()
 
             setNodes(data
                 .filter(v => v != null)
@@ -86,7 +89,9 @@ const App: React.FC = () => {
                 return {
                     id: v.name,
                     ip: v.virtualIp,
-                    latency: v.latency
+                    latency: v.latency,
+                    connected: v.connected,
+                    isLocal: v.isLocal
                 }
             }));
             setLoading(false);
@@ -121,6 +126,40 @@ const App: React.FC = () => {
                 {latency}ms <ClockCircleOutlined/>
             </Text>
         );
+    };
+
+    // 点击连接
+    const handleConnect = async (ip: string) => {
+        setConnecting(ip)
+        try {
+            await ConnectTo(ip)
+            message.success('连接请求已发送')
+        } catch (e) {
+            message.error(String(e))
+        } finally {
+            setConnecting(null)
+        }
+    };
+
+    // 右侧操作区：根据状态显示本机标签/连接按钮/已连接标签
+    const getActionDisplay = (item: VpnNode) => {
+        if (item.isLocal) {
+            return <Badge status="processing" text="本机"/>
+        }
+        if (item.connected) {
+            return <Badge status="success" text="已连接"/>
+        }
+        return (
+            <Button
+                type="primary"
+                size="small"
+                icon={<LinkOutlined/>}
+                loading={connecting === item.ip}
+                onClick={() => handleConnect(item.ip)}
+            >
+                连接
+            </Button>
+        )
     };
 
 
@@ -163,7 +202,12 @@ const App: React.FC = () => {
                         renderItem={item => (
                             <List.Item
 
-                                extra={getLatencyDisplay(item.latency)}
+                                extra={
+                                    <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px'}}>
+                                        {getActionDisplay(item)}
+                                        {getLatencyDisplay(item.latency)}
+                                    </div>
+                                }
                                 style={{
                                     borderRadius: '4px',
                                     marginBottom: '12px',
