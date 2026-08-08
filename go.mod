@@ -13,7 +13,10 @@ require (
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 )
 
-require github.com/wailsapp/wails/v3 v3.0.0-alpha.37
+require (
+	github.com/joho/godotenv v1.5.1
+	github.com/wailsapp/wails/v3 v3.0.0-alpha.37
+)
 
 require (
 	dario.cat/mergo v1.0.1 // indirect
