@@ -6,6 +6,8 @@ import (
 	"net"
 	"sync"
 
+	"virtualnet/common"
+
 	"github.com/gorilla/websocket"
 	"golang.zx2c4.com/wireguard/tun"
 )
@@ -36,7 +38,9 @@ func getCurClient() *Client {
 }
 
 var (
-	serverWS  = flag.String("server", "ws://8.138.243.253:8080/ws", "WebSocket服务器地址")
+	// serverWS 仅注册 flag，默认值在 Run() 内结合 .env / 环境变量动态求值，
+	// 避免 .env 还未加载时包级初始化就把默认值算死。
+	serverWS = flag.String("server", "", "WebSocket服务器地址（留空则读 VIRNET_SERVER 环境变量）")
 	virtualIP string             // 本地虚拟IP（服务端下发）
 	serverTCP string             // 服务器TCP地址
 	token     string             // 认证令牌
@@ -49,13 +53,25 @@ var (
 // 客户端状态变更回调函数
 var onClientChangeFunc []func()
 
+// resolveServerWS 按优先级确定最终连接的服务器地址：
+// 命令行 -server > 环境变量 VIRNET_SERVER（含 .env）> 默认硬编码。
+func resolveServerWS() string {
+	if *serverWS != "" {
+		return *serverWS
+	}
+	return common.Getenv("VIRNET_SERVER", "ws://43.138.247.132:8080/ws")
+}
+
 // Run 启动客户端
 func Run() {
 	tcpConns = make(map[string]*Client)
 
+	serverAddr := resolveServerWS()
+	log.Printf("连接服务器: %s", serverAddr)
+
 	// 连接WebSocket服务器
 	var err error
-	wsConn, _, err = websocket.DefaultDialer.Dial(*serverWS, nil)
+	wsConn, _, err = websocket.DefaultDialer.Dial(serverAddr, nil)
 	if err != nil {
 		log.Fatalf("连接WS服务器失败: %v", err)
 	}

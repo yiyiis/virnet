@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"log"
 	"virtualnet/client"
+	"virtualnet/common"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -21,6 +22,8 @@ var assets embed.FS
 // and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
 // logs any error that might occur.
 func main() {
+	// 加载 .env（存在则读取，不存在静默忽略），让桌面端也能通过 .env 配置服务器地址
+	common.LoadEnv()
 
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.

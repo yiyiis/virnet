@@ -1,2 +1,8 @@
 .idea
 client.exe
+
+# 本地环境配置（含服务器地址等敏感信息，不入库；团队共享 .env.example）
+.env
+
+# ZCode 工具会话产物（计划/临时文件，不入库）
+.zcode/

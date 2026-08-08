@@ -3,8 +3,38 @@ package common
 
 import (
 	"encoding/json"
+	"log"
+	"os"
 	"time"
+
+	"github.com/joho/godotenv"
 )
+
+// LoadEnv 从工作目录或指定路径加载 .env 文件到当前进程的环境变量。
+// 文件不存在时静默忽略（线上部署通常用真实环境变量，无需 .env）。
+// 解析失败仅告警不中断，避免本地 .env 笔误导致程序无法启动。
+//
+// 使用约定：
+//   - 本地开发：仓库根放 .env（已在 .gitignore 排除），团队共享 .env.example
+//   - 线上部署：不用 .env，用 systemd EnvironmentFile / docker env_file / export
+func LoadEnv(paths ...string) {
+	if err := godotenv.Load(paths...); err != nil {
+		// .env 不存在是正常情况，仅在解析出错时告警
+		if !os.IsNotExist(err) {
+			log.Printf("加载.env文件失败: %v", err)
+		}
+	}
+}
+
+// Getenv 读取环境变量，未设置时返回 fallback 兜底值。
+// 服务端与客户端的所有可配置项（服务器IP/端口等）统一走此函数，
+// 既支持用环境变量配置，又保留原有硬编码作为默认值。
+func Getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 // 消息类型
 const (
