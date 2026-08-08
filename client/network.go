@@ -119,9 +119,13 @@ func readTCPAndWriteTun(targetIP string, tcpConn net.Conn) {
 			return
 		}
 		packetLen := binary.BigEndian.Uint32(lengthBuf)
-		if packetLen == 0 || packetLen > 1500 { // 限制最大长度（MTU=1500）
-			log.Printf("无效的数据包长度: %d", packetLen)
-			return
+		// 长度校验：跳过异常包继续读下一个，而不是 return 杀掉整条隧道。
+		// 上限放宽到 65535（IP 包理论最大值）：MTU=1500 是链路层限制，但隧道传的是
+		// 裸 IP 包，对端 TUN 重组/分片场景下单帧可能 >1500（如 SSH 密钥交换大包），
+		// 严格卡 1500 会让正常的大包被判为"无效"并断开隧道，导致 SSH 等服务卡死。
+		if packetLen == 0 || packetLen > 65535 {
+			log.Printf("无效的数据包长度: %d，跳过", packetLen)
+			continue
 		}
 		n := int(packetLen)
 
