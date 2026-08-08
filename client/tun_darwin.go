@@ -10,6 +10,12 @@ func tunDeviceName() string {
 	return "utun"
 }
 
+// tunPacketOffset 返回 TUN 读写时需预留的协议头空间。
+// macOS utun 协议头为 4 字节，wireguard/tun 内部据此做 buf[offset-4:]。
+func tunPacketOffset() int {
+	return 4
+}
+
 func setupTun(ifname, ip, _ string) error {
 	// macOS utun 为点对点设备：先挂 /32 地址，再显式添加虚拟网段路由
 	cmd := exec.Command("ifconfig", ifname, "inet", ip, ip, "netmask", "255.255.255.255", "up")
