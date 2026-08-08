@@ -10,6 +10,17 @@ import (
 	"virtualnet/common"
 )
 
+// bufferedConn 包装 net.Conn，在读取时先消费 json.Decoder 残留的缓冲数据，
+// 避免 io.Copy 直接读 conn 时跳过被 Decoder 多读的字节，导致数据流错位。
+type bufferedConn struct {
+	net.Conn
+	reader io.Reader
+}
+
+func (bc *bufferedConn) Read(p []byte) (int, error) {
+	return bc.reader.Read(p)
+}
+
 // 处理TCP连接（认证+转发）
 func handleTCPConnection(conn net.Conn) {
 	needClose := true
@@ -26,6 +37,9 @@ func handleTCPConnection(conn net.Conn) {
 		log.Printf("TCP认证失败（解析错误）: %v", err)
 		return
 	}
+
+	// 将 Decoder 可能多读的缓冲数据拼回连接，防止 io.Copy 丢失首包字节导致数据流错位
+	conn = &bufferedConn{Conn: conn, reader: io.MultiReader(decoder.Buffered(), conn)}
 
 	log.Printf("TCP 认证信息：%+v", auth)
 

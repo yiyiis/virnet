@@ -14,7 +14,7 @@ var (
 
 func initTunDevice(ip string) error {
 	devName := tunDeviceName()
-	device, err := tun.CreateTUN(devName, 1500)
+	device, err := tun.CreateTUN(devName, 1400)
 	if err != nil {
 		return err
 	}
