@@ -18,6 +18,10 @@ func setupTun(ifname, ip, _ string) error {
 		return wrapErrorf(err, "配置Tun IP失败, 输出: %s", string(output))
 	}
 
+	// 先清理可能残留的旧网段路由（旧实例崩溃残留 / 同机多实例冲突）。
+	// route delete 在路由不存在时返回非 0，属正常情况，忽略其错误与输出。
+	exec.Command("route", "-n", "delete", "-net", "192.168.32.0/24").Run()
+
 	cmd = exec.Command("route", "-n", "add", "-net", "192.168.32.0/24", "-interface", ifname)
 	output, err = cmd.CombinedOutput()
 	if err != nil {

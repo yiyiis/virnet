@@ -135,6 +135,8 @@ func processWSMessage(data []byte) {
 		}
 
 		curInfo := clientInfos[curInfoIdx]
+
+		// 1) 更新 tcpConns（隧道池）里已有对端的昵称/延迟，供转发与日志使用。
 		mutex.Lock()
 		for _, clientInfo := range clientInfos {
 			client, ok := tcpConns[clientInfo.VirtualIP]
@@ -152,6 +154,25 @@ func processWSMessage(data []byte) {
 			client.SetLatency(int(curInfo.Latency + clientInfo.Latency))
 		}
 		mutex.Unlock()
+
+		// 2) 用服务器权威全量列表重建 UI 展示列表 onlineClients。
+		// 这与隧道池解耦：即使某对端 TCP 隧道断开，只要服务器仍判定其在线，它就留在列表里；
+		// 反之服务器判定下线（从 clientInfos 消失）即从列表移除。
+		newList := make([]*Client, 0, len(clientInfos))
+		for _, clientInfo := range clientInfos {
+			latency := int(clientInfo.Latency)
+			if clientInfo.VirtualIP != virtualIP {
+				latency = int(curInfo.Latency + clientInfo.Latency)
+			}
+			newList = append(newList, &Client{
+				Name:      clientInfo.Name,
+				VirtualIp: clientInfo.VirtualIP,
+				Latency:   latency,
+			})
+		}
+		onlineClientsMu.Lock()
+		onlineClients = newList
+		onlineClientsMu.Unlock()
 
 		notifyClientChange()
 	}
