@@ -13,9 +13,6 @@ import (
 	"virtualnet/common"
 )
 
-// darwin/BSD utun 读写需要预留 4 字节协议头空间；Windows/Linux 同样兼容该 offset
-const tunPacketOffset = 4
-
 // 从Tun设备读取IP包并转发到对应TCP连接
 func readTunAndForward() {
 	if tunDevice == nil {
@@ -23,13 +20,16 @@ func readTunAndForward() {
 		return
 	}
 
+	// 协议头预留空间按平台不同：macOS utun 需 4 字节，Linux 开启 VNET_HDR 时需 >=10 字节。
+	offset := tunPacketOffset()
+
 	mtu, _ := tunDevice.MTU()
-	packetBuf := make([]byte, mtu+tunPacketOffset) // 存储Tun读取的IP包（含offset前缀）
-	sizes := make([]int, 1)                        // 用于tun.Read的长度接收
+	packetBuf := make([]byte, mtu+offset) // 存储Tun读取的IP包（含offset前缀）
+	sizes := make([]int, 1)               // 用于tun.Read的长度接收
 
 	for {
 		// 从Tun设备读取数据包
-		_, err := tunDevice.Read([][]byte{packetBuf}, sizes, tunPacketOffset)
+		_, err := tunDevice.Read([][]byte{packetBuf}, sizes, offset)
 		if err != nil {
 			log.Printf("Tun设备读取失败: %v，停止转发", err)
 			return
@@ -38,7 +38,7 @@ func readTunAndForward() {
 		if packetLen == 0 {
 			continue
 		}
-		packet := packetBuf[tunPacketOffset : tunPacketOffset+packetLen]
+		packet := packetBuf[offset : offset+packetLen]
 
 		// 解析IPv4头部（只处理IPv4包）
 		ipHeader, err := ipv4.ParseHeader(packet)
@@ -107,6 +107,9 @@ func readTCPAndWriteTun(targetIP string, tcpConn net.Conn) {
 		closeTCPConn(targetIP) // 退出时清理连接
 	}()
 
+	// 协议头预留空间按平台不同（见 readTunAndForward 的说明）。
+	offset := tunPacketOffset()
+
 	lengthBuf := make([]byte, 4) // 存储前4字节的长度
 	for {
 		// 先读取4字节长度
@@ -116,25 +119,30 @@ func readTCPAndWriteTun(targetIP string, tcpConn net.Conn) {
 			return
 		}
 		packetLen := binary.BigEndian.Uint32(lengthBuf)
-		if packetLen == 0 || packetLen > 1500 { // 限制最大长度（MTU=1500）
-			log.Printf("无效的数据包长度: %d", packetLen)
-			return
+		// 长度校验：跳过异常包继续读下一个，而不是 return 杀掉整条隧道。
+		// 上限放宽到 65535（IP 包理论最大值）：MTU=1500 是链路层限制，但隧道传的是
+		// 裸 IP 包，对端 TUN 重组/分片场景下单帧可能 >1500（如 SSH 密钥交换大包），
+		// 严格卡 1500 会让正常的大包被判为"无效"并断开隧道，导致 SSH 等服务卡死。
+		if packetLen == 0 || packetLen > 65535 {
+			log.Printf("无效的数据包长度: %d，跳过", packetLen)
+			continue
 		}
+		n := int(packetLen)
 
 		// 读取对应长度的IP包
-		packet := make([]byte, packetLen)
+		packet := make([]byte, n)
 		_, err = io.ReadFull(tcpConn, packet)
 		if err != nil {
 			log.Printf("从 %s 读取数据包失败: %v", targetIP, err)
 			return
 		}
 
-		addWriteTunCount(int64(packetLen))
+		addWriteTunCount(int64(n))
 
-		// 写入Tun设备（让系统处理该IP包）；前 tunPacketOffset 字节供平台协议头使用
-		writeBuf := make([]byte, tunPacketOffset+packetLen)
-		copy(writeBuf[tunPacketOffset:], packet)
-		_, err = tunDevice.Write([][]byte{writeBuf}, tunPacketOffset)
+		// 写入Tun设备（让系统处理该IP包）；前 offset 字节供平台协议头使用
+		writeBuf := make([]byte, offset+n)
+		copy(writeBuf[offset:], packet)
+		_, err = tunDevice.Write([][]byte{writeBuf}, offset)
 		if err != nil {
 			log.Printf("写入Tun设备失败: %v", err)
 			return

@@ -33,8 +33,18 @@ func (c *Client) SetLatency(latency int) {
 	c.Latency = latency
 }
 
+// getCurClient 返回本机在在线列表中的展示条目。
+// 优先从 onlineClients 取（由服务器广播维护），未就绪时回退构造一个临时条目。
 func getCurClient() *Client {
-	return tcpConns[virtualIP]
+	onlineClientsMu.RLock()
+	defer onlineClientsMu.RUnlock()
+	for _, c := range onlineClients {
+		if c.VirtualIp == virtualIP {
+			return c
+		}
+	}
+	// 服务器首次广播到达前，构造临时本机条目，保证 UI 不空。
+	return &Client{Name: "本机", VirtualIp: virtualIP}
 }
 
 var (
@@ -45,9 +55,15 @@ var (
 	serverTCP string             // 服务器TCP地址
 	token     string             // 认证令牌
 	wsConn    *websocket.Conn    // WebSocket连接
-	tcpConns  map[string]*Client // 按目标IP存储的TCP连接（key: 目标虚拟IP）
+	tcpConns  map[string]*Client // 按目标IP存储的TCP连接（key: 目标虚拟IP），仅作数据隧道连接池
 	mutex     sync.Mutex         // 保护共享变量
 	tunDevice tun.Device         // Wintun虚拟网卡设备
+
+	// onlineClients 是由服务器全量广播驱动的在线节点列表，专供 UI 展示。
+	// 与 tcpConns（隧道连接池）解耦：TCP 隧道断开不再让对端从列表消失，
+	// 对端的去留完全跟随服务器的权威在线状态。
+	onlineClients   []*Client
+	onlineClientsMu sync.RWMutex
 )
 
 // 客户端状态变更回调函数
@@ -92,21 +108,24 @@ func SetName(name string) error {
 	return sendRegisterMsg(name)
 }
 
-// GetClients 获取当前连接的客户端列表
+// GetClients 获取当前在线客户端列表（UI 数据源）。
+// 数据来自服务器全量广播维护的 onlineClients，与 TCP 隧道连接池 tcpConns 解耦：
+// 对端 TCP 隧道断开不会让它从列表消失，只有服务器判定其下线才会。
 func GetClients() []*Client {
-	mutex.Lock()
-	defer mutex.Unlock()
+	curVirtualIP := virtualIP
 
-	curClient := getCurClient()
+	onlineClientsMu.RLock()
+	defer onlineClientsMu.RUnlock()
+
 	var clients []*Client
-	for _, client := range tcpConns {
+	for _, client := range onlineClients {
 		addClient := &Client{
 			Name:      client.Name,
 			VirtualIp: client.VirtualIp,
 			Latency:   client.Latency,
 		}
 		// 本机放第一个
-		if client == curClient {
+		if client.VirtualIp == curVirtualIP {
 			clients = append([]*Client{addClient}, clients...)
 		} else {
 			clients = append(clients, addClient)
