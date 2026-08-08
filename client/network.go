@@ -13,6 +13,9 @@ import (
 	"virtualnet/common"
 )
 
+// darwin/BSD utun 读写需要预留 4 字节协议头空间；Windows/Linux 同样兼容该 offset
+const tunPacketOffset = 4
+
 // 从Tun设备读取IP包并转发到对应TCP连接
 func readTunAndForward() {
 	if tunDevice == nil {
@@ -21,12 +24,12 @@ func readTunAndForward() {
 	}
 
 	mtu, _ := tunDevice.MTU()
-	packetBuf := make([]byte, mtu) // 存储Tun读取的IP包
-	sizes := make([]int, 1)        // 用于tun.Read的长度接收
+	packetBuf := make([]byte, mtu+tunPacketOffset) // 存储Tun读取的IP包（含offset前缀）
+	sizes := make([]int, 1)                        // 用于tun.Read的长度接收
 
 	for {
 		// 从Tun设备读取数据包
-		_, err := tunDevice.Read([][]byte{packetBuf}, sizes, 0)
+		_, err := tunDevice.Read([][]byte{packetBuf}, sizes, tunPacketOffset)
 		if err != nil {
 			log.Printf("Tun设备读取失败: %v，停止转发", err)
 			return
@@ -35,7 +38,7 @@ func readTunAndForward() {
 		if packetLen == 0 {
 			continue
 		}
-		packet := packetBuf[:packetLen]
+		packet := packetBuf[tunPacketOffset : tunPacketOffset+packetLen]
 
 		// 解析IPv4头部（只处理IPv4包）
 		ipHeader, err := ipv4.ParseHeader(packet)
@@ -128,8 +131,10 @@ func readTCPAndWriteTun(targetIP string, tcpConn net.Conn) {
 
 		addWriteTunCount(int64(packetLen))
 
-		// 写入Tun设备（让系统处理该IP包）
-		_, err = tunDevice.Write([][]byte{packet}, 0)
+		// 写入Tun设备（让系统处理该IP包）；前 tunPacketOffset 字节供平台协议头使用
+		writeBuf := make([]byte, tunPacketOffset+packetLen)
+		copy(writeBuf[tunPacketOffset:], packet)
+		_, err = tunDevice.Write([][]byte{writeBuf}, tunPacketOffset)
 		if err != nil {
 			log.Printf("写入Tun设备失败: %v", err)
 			return

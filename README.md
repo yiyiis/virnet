@@ -27,7 +27,7 @@
 ## 技术栈
 
 - **后端**：Go 1.25
-- **虚拟网卡**：WireGuard 的 Wintun 驱动
+- **虚拟网卡**：WireGuard tun（Windows Wintun / Linux TUN / macOS utun）
 - **前端**：React + TypeScript + Ant Design（Wails v3 桌面应用）
 - **通信协议**：WebSocket（信令）+ TCP（数据）
 
@@ -44,7 +44,10 @@ gamevpn/
 ├── client/             # 客户端核心库
 │   ├── client.go       # 客户端结构体、启动逻辑
 │   ├── network.go      # TUN 读写、TCP 连接管理、IP 包转发
-│   ├── tun.go          # TUN 设备初始化（Windows）
+│   ├── tun.go          # TUN 设备初始化
+│   ├── tun_windows.go  # Windows TUN 配置（netsh）
+│   ├── tun_linux.go    # Linux TUN 配置（ip）
+│   ├── tun_darwin.go   # macOS TUN 配置（ifconfig/route）
 │   ├── message.go      # WebSocket 消息处理
 │   └── util.go         # 工具函数
 ├── common/             # 共用协议定义
@@ -103,7 +106,7 @@ go run . -server ws://<服务器地址>:8080/ws
 
 ## 限制
 
-- 仅支持 Windows（TUN 配置依赖 netsh）
+- 支持 Windows / Linux / macOS（创建 TUN 需管理员/root 权限）
 - 流量经服务器中转，非 P2P 直连
 - TCP 数据通道无加密
 - 客户端断线无自动重连
